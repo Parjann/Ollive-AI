@@ -1,10 +1,10 @@
 import { prisma } from "@/lib/prisma"
 import { v4 as uuidv4 } from "uuid"
-
-import { logInference } from "@/lib/logger"
-
 import { getProvider } from "@/lib/providers"
 import { redactPII } from "@/lib/pii"
+import "@/lib/init-events"
+import { eventBus } from "@/lib/events"
+import { EVENTS } from "@/lib/event-types"
 
 export async function POST(req: Request) {
     const requestId = uuidv4()
@@ -154,41 +154,45 @@ export async function POST(req: Request) {
                         const latencyMs =
                             Date.now() - startTime
 
-                        // Log successful inference
-                        await logInference({
-                            requestId,
+                        // Emit successful inference event
+                        eventBus.emit(
+                            EVENTS.INFERENCE_COMPLETED,
 
-                            provider,
+                            {
+                                requestId,
 
-                            model,
+                                provider,
 
-                            latencyMs,
+                                model,
 
-                            promptTokens:
-                                previousMessages.length,
+                                latencyMs,
 
-                            completionTokens:
-                                fullResponse.length,
+                                promptTokens:
+                                    previousMessages.length,
 
-                            totalTokens:
-                                previousMessages.length +
-                                fullResponse.length,
+                                completionTokens:
+                                    fullResponse.length,
 
-                            status: "success",
+                                totalTokens:
+                                    previousMessages.length +
+                                    fullResponse.length,
 
-                            inputPreview:
-                                redactPII(
-                                    message.slice(0, 100)
-                                ),
+                                status: "success",
 
-                            outputPreview:
-                                redactPII(
-                                    fullResponse.slice(0, 100)
-                                ),
+                                inputPreview:
+                                    redactPII(
+                                        message.slice(0, 100)
+                                    ),
 
-                            conversationId:
-                                conversation.id,
-                        })
+                                outputPreview:
+                                    redactPII(
+                                        fullResponse.slice(0, 100)
+                                    ),
+
+                                conversationId:
+                                    conversation.id,
+                            }
+                        )
 
                         controller.close()
                     } catch (streamError) {
@@ -213,28 +217,32 @@ export async function POST(req: Request) {
     } catch (error) {
         console.error(error)
 
-        // Log failed inference safely if a valid conversation has been established
+        // Emit failed inference event
         if (conversationId && conversationId !== "unknown") {
-            await logInference({
-                requestId,
+            eventBus.emit(
+                EVENTS.INFERENCE_FAILED,
 
-                provider,
+                {
+                    requestId,
 
-                model,
+                    provider,
 
-                latencyMs: 0,
+                    model,
 
-                status: "error",
+                    latencyMs: 0,
 
-                errorMessage:
-                    redactPII(
-                        error instanceof Error
-                            ? error.message
-                            : "Unknown error"
-                    ),
+                    status: "error",
 
-                conversationId,
-            })
+                    errorMessage:
+                        redactPII(
+                            error instanceof Error
+                                ? error.message
+                                : "Unknown error"
+                        ),
+
+                    conversationId,
+                }
+            )
         }
 
         return new Response(
