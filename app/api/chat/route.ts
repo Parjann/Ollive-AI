@@ -1,6 +1,5 @@
 import { groq } from "@/lib/groq"
 import { prisma } from "@/lib/prisma"
-import { NextResponse } from "next/server"
 
 export async function POST(req: Request) {
     try {
@@ -10,7 +9,6 @@ export async function POST(req: Request) {
 
         let conversation
 
-        // Create new conversation if none exists
         if (!conversationId) {
             conversation = await prisma.conversation.create({
                 data: {
@@ -26,10 +24,9 @@ export async function POST(req: Request) {
         }
 
         if (!conversation) {
-            return NextResponse.json(
-                { error: "Conversation not found" },
-                { status: 404 }
-            )
+            return new Response("Conversation not found", {
+                status: 404,
+            })
         }
 
         // Save user message
@@ -41,8 +38,8 @@ export async function POST(req: Request) {
             },
         })
 
-        // Fetch conversation history
-        const messages = await prisma.message.findMany({
+        // Fetch previous messages
+        const previousMessages = await prisma.message.findMany({
             where: {
                 conversationId: conversation.id,
             },
@@ -51,44 +48,58 @@ export async function POST(req: Request) {
             },
         })
 
-        // Format for Groq
-        const formattedMessages = messages.map((msg) => ({
+        const formattedMessages = previousMessages.map((msg) => ({
             role: msg.role as "user" | "assistant",
             content: msg.content,
         }))
 
-        // Call Groq
-        const completion = await groq.chat.completions.create({
+        // Streaming completion
+        const stream = await groq.chat.completions.create({
             model: "llama-3.3-70b-versatile",
             messages: formattedMessages,
+            stream: true,
         })
 
-        const assistantMessage =
-            completion.choices[0]?.message?.content || ""
+        let fullResponse = ""
 
-        // Save assistant response
-        await prisma.message.create({
-            data: {
-                role: "assistant",
-                content: assistantMessage,
-                conversationId: conversation.id,
+        const encoder = new TextEncoder()
+
+        const readableStream = new ReadableStream({
+            async start(controller) {
+                for await (const chunk of stream) {
+                    const content =
+                        chunk.choices[0]?.delta?.content || ""
+
+                    fullResponse += content
+
+                    controller.enqueue(
+                        encoder.encode(content)
+                    )
+                }
+
+                // Save assistant message after stream completes
+                await prisma.message.create({
+                    data: {
+                        role: "assistant",
+                        content: fullResponse,
+                        conversationId: conversation.id,
+                    },
+                })
+
+                controller.close()
             },
         })
 
-        return NextResponse.json({
-            conversationId: conversation.id,
-            message: assistantMessage,
+        return new Response(readableStream, {
+            headers: {
+                "Content-Type": "text/plain; charset=utf-8",
+            },
         })
     } catch (error) {
         console.error(error)
 
-        return NextResponse.json(
-            {
-                error: "Something went wrong",
-            },
-            {
-                status: 500,
-            }
-        )
+        return new Response("Something went wrong", {
+            status: 500,
+        })
     }
 }

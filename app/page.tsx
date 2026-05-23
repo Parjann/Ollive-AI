@@ -22,59 +22,128 @@ export default function HomePage() {
   const [conversationId, setConversationId] = useState("")
   const [conversations, setConversations] = useState<Conversation[]>([])
 
-  async function fetchConversations() {
-    const res = await fetch("/api/conversations")
-    const data = await res.json()
+  const [isStreaming, setIsStreaming] = useState(false)
 
-    setConversations(data)
+  const [controller, setController] =
+    useState<AbortController | null>(null)
+
+  async function fetchConversations() {
+    try {
+      const res = await fetch("/api/conversations")
+
+      const data = await res.json()
+
+      setConversations(data)
+    } catch (error) {
+      console.error(error)
+    }
   }
 
   async function loadConversation(id: string) {
-    const res = await fetch(`/api/conversations/${id}`)
-    const data = await res.json()
+    try {
+      const res = await fetch(`/api/conversations/${id}`)
 
-    setConversationId(id)
-    setMessages(data)
+      const data = await res.json()
+
+      setConversationId(id)
+
+      setMessages(data)
+    } catch (error) {
+      console.error(error)
+    }
   }
 
   async function sendMessage() {
     if (!input.trim()) return
 
-    const userMessage = {
-      role: "user",
-      content: input,
+    try {
+      setIsStreaming(true)
+
+      const userMessage = {
+        role: "user",
+        content: input,
+      }
+
+      setMessages((prev) => [...prev, userMessage])
+
+      const currentInput = input
+
+      setInput("")
+
+      const abortController = new AbortController()
+
+      setController(abortController)
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: currentInput,
+          conversationId,
+        }),
+        signal: abortController.signal,
+      })
+
+      // Get conversation ID from response headers
+      const newConversationId =
+        res.headers.get("x-conversation-id")
+
+      if (!conversationId && newConversationId) {
+        setConversationId(newConversationId)
+
+        fetchConversations()
+      }
+
+      const reader = res.body?.getReader()
+
+      if (!reader) return
+
+      let assistantMessage = ""
+
+      // Add empty assistant message
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "",
+        },
+      ])
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) break
+
+        const chunk = new TextDecoder().decode(value)
+
+        assistantMessage += chunk
+
+        setMessages((prev) => {
+          const updated = [...prev]
+
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: assistantMessage,
+          }
+
+          return updated
+        })
+      }
+    } catch (error: any) {
+      if (error.name !== "AbortError") {
+        console.error(error)
+      }
+    } finally {
+      setIsStreaming(false)
     }
+  }
 
-    setMessages((prev) => [...prev, userMessage])
+  function handleCancel() {
+    controller?.abort()
 
-    const currentInput = input
-    setInput("")
-
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: currentInput,
-        conversationId,
-      }),
-    })
-
-    const data = await res.json()
-
-    if (!conversationId) {
-      setConversationId(data.conversationId)
-      fetchConversations()
-    }
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "assistant",
-        content: data.message,
-      },
-    ])
+    setIsStreaming(false)
   }
 
   useEffect(() => {
@@ -82,7 +151,7 @@ export default function HomePage() {
   }, [])
 
   return (
-    <main className="flex">
+    <main className="flex h-screen">
       <ConversationSidebar
         conversations={conversations}
         onSelect={loadConversation}
@@ -99,6 +168,8 @@ export default function HomePage() {
           input={input}
           setInput={setInput}
           onSend={sendMessage}
+          onCancel={handleCancel}
+          isStreaming={isStreaming}
         />
       </div>
     </main>
