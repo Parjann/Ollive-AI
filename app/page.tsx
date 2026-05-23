@@ -1,16 +1,41 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
-type ChatMessage = {
+import ConversationSidebar from "@/components/sidebar/ConversationSidebar"
+import ChatWindow from "@/components/chat/ChatWindow"
+import ChatInput from "@/components/chat/ChatInput"
+
+type Message = {
   role: string
   content: string
 }
 
+type Conversation = {
+  id: string
+  title: string
+}
+
 export default function HomePage() {
   const [input, setInput] = useState("")
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
   const [conversationId, setConversationId] = useState("")
+  const [conversations, setConversations] = useState<Conversation[]>([])
+
+  async function fetchConversations() {
+    const res = await fetch("/api/conversations")
+    const data = await res.json()
+
+    setConversations(data)
+  }
+
+  async function loadConversation(id: string) {
+    const res = await fetch(`/api/conversations/${id}`)
+    const data = await res.json()
+
+    setConversationId(id)
+    setMessages(data)
+  }
 
   async function sendMessage() {
     if (!input.trim()) return
@@ -40,6 +65,7 @@ export default function HomePage() {
 
     if (!conversationId) {
       setConversationId(data.conversationId)
+      fetchConversations()
     }
 
     setMessages((prev) => [
@@ -51,42 +77,29 @@ export default function HomePage() {
     ])
   }
 
+  useEffect(() => {
+    fetchConversations()
+  }, [])
+
   return (
-    <main className="min-h-screen flex flex-col items-center p-6">
-      <h1 className="text-4xl font-bold mb-6">
-        AI Observability Platform
-      </h1>
+    <main className="flex">
+      <ConversationSidebar
+        conversations={conversations}
+        onSelect={loadConversation}
+      />
 
-      <div className="w-full max-w-2xl flex flex-col gap-4">
-        <div className="border rounded-lg p-4 h-[500px] overflow-y-auto">
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              className={`mb-4 ${msg.role === "user"
-                ? "text-right"
-                : "text-left"
-                }`}
-            >
-              <div className="inline-block border rounded-lg px-4 py-2">
-                {msg.content}
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="flex-1 p-6 flex flex-col gap-4">
+        <h1 className="text-4xl font-bold">
+          AI Observability Platform
+        </h1>
 
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask something..."
-          className="border rounded-lg p-4"
+        <ChatWindow messages={messages} />
+
+        <ChatInput
+          input={input}
+          setInput={setInput}
+          onSend={sendMessage}
         />
-
-        <button
-          onClick={sendMessage}
-          className="bg-black text-white rounded-lg px-6 py-3"
-        >
-          Send
-        </button>
       </div>
     </main>
   )
