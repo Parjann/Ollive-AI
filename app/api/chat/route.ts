@@ -1,17 +1,36 @@
-import { groq } from "@/lib/groq"
 import { prisma } from "@/lib/prisma"
 import { v4 as uuidv4 } from "uuid"
+
 import { logInference } from "@/lib/logger"
+
+import { getProvider } from "@/lib/providers"
 
 export async function POST(req: Request) {
     const requestId = uuidv4()
 
     let conversationId = "unknown"
+    let provider = "groq"
+    let model = "llama-3.3-70b-versatile"
 
     try {
         const body = await req.json()
 
-        const { message, conversationId: incomingConversationId } = body
+        const {
+            message,
+            conversationId: incomingConversationId,
+            provider: incomingProvider,
+            model: incomingModel,
+        } = body
+
+        if (incomingProvider) {
+            provider = incomingProvider
+        }
+
+        if (incomingModel) {
+            model = incomingModel
+        } else {
+            model = provider === "gemini" ? "gemini-2.5-flash" : "llama-3.3-70b-versatile"
+        }
 
         conversationId = incomingConversationId
 
@@ -37,9 +56,12 @@ export async function POST(req: Request) {
         }
 
         if (!conversation) {
-            return new Response("Conversation not found", {
-                status: 404,
-            })
+            return new Response(
+                "Conversation not found",
+                {
+                    status: 404,
+                }
+            )
         }
 
         // Save user message
@@ -52,97 +74,127 @@ export async function POST(req: Request) {
         })
 
         // Fetch previous messages
-        const previousMessages = await prisma.message.findMany({
-            where: {
-                conversationId: conversation.id,
-            },
-            orderBy: {
-                createdAt: "asc",
-            },
-        })
+        const previousMessages =
+            await prisma.message.findMany({
+                where: {
+                    conversationId:
+                        conversation.id,
+                },
+                orderBy: {
+                    createdAt: "asc",
+                },
+            })
 
-        // Format messages for Groq
-        const formattedMessages = previousMessages.map((msg) => ({
-            role: msg.role as "user" | "assistant",
-            content: msg.content,
-        }))
+        // Format messages
+        const formattedMessages =
+            previousMessages.map((msg) => ({
+                role: msg.role as
+                    | "user"
+                    | "assistant",
+                content: msg.content,
+            }))
 
-        // Streaming completion
-        const stream = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
-            messages: formattedMessages,
-            stream: true,
-        })
+        // Get provider dynamically
+        const llmProvider =
+            getProvider(provider)
+
+        // Stream response
+        const stream =
+            await llmProvider.streamChat(
+                formattedMessages,
+                model
+            )
 
         let fullResponse = ""
 
         const encoder = new TextEncoder()
 
-        const readableStream = new ReadableStream({
-            async start(controller) {
-                try {
-                    for await (const chunk of stream) {
-                        const content =
-                            chunk.choices[0]?.delta?.content || ""
+        const readableStream =
+            new ReadableStream({
+                async start(controller) {
+                    try {
+                        for await (const chunk of stream as any) {
+                            let content = ""
 
-                        fullResponse += content
+                            // Gemini streaming
+                            if (provider === "gemini") {
+                                try {
+                                    content = chunk.text() || ""
+                                } catch (e) {
+                                    content = ""
+                                }
+                            }
 
-                        controller.enqueue(
-                            encoder.encode(content)
+                            // Groq streaming
+                            else {
+                                content =
+                                    chunk.choices?.[0]
+                                        ?.delta?.content || ""
+                            }
+
+                            fullResponse += content
+
+                            controller.enqueue(
+                                encoder.encode(content)
+                            )
+                        }
+
+                        // Save assistant message
+                        await prisma.message.create({
+                            data: {
+                                role: "assistant",
+                                content: fullResponse,
+                                conversationId:
+                                    conversation.id,
+                            },
+                        })
+
+                        // Calculate latency
+                        const latencyMs =
+                            Date.now() - startTime
+
+                        // Log successful inference
+                        await logInference({
+                            requestId,
+
+                            provider,
+
+                            model,
+
+                            latencyMs,
+
+                            promptTokens:
+                                previousMessages.length,
+
+                            completionTokens:
+                                fullResponse.length,
+
+                            totalTokens:
+                                previousMessages.length +
+                                fullResponse.length,
+
+                            status: "success",
+
+                            inputPreview:
+                                message.slice(0, 100),
+
+                            outputPreview:
+                                fullResponse.slice(0, 100),
+
+                            conversationId:
+                                conversation.id,
+                        })
+
+                        controller.close()
+                    } catch (streamError) {
+                        console.error(streamError)
+
+                        controller.error(
+                            streamError
                         )
                     }
-
-                    // Save assistant message
-                    await prisma.message.create({
-                        data: {
-                            role: "assistant",
-                            content: fullResponse,
-                            conversationId: conversation.id,
-                        },
-                    })
-
-                    // Calculate latency
-                    const latencyMs = Date.now() - startTime
-
-                    // Log successful inference
-                    await logInference({
-                        requestId,
-
-                        provider: "groq",
-
-                        model: "llama-3.3-70b-versatile",
-
-                        latencyMs,
-
-                        promptTokens:
-                            previousMessages.length,
-
-                        completionTokens:
-                            fullResponse.length,
-
-                        totalTokens:
-                            previousMessages.length +
-                            fullResponse.length,
-
-                        status: "success",
-
-                        inputPreview:
-                            message.slice(0, 100),
-
-                        outputPreview:
-                            fullResponse.slice(0, 100),
-
-                        conversationId: conversation.id,
-                    })
-
-                    controller.close()
-                } catch (streamError) {
-                    console.error(streamError)
-
-                    controller.error(streamError)
-                }
-            },
-        })
+                },
+            })
 
         return new Response(readableStream, {
             headers: {
@@ -156,28 +208,33 @@ export async function POST(req: Request) {
     } catch (error) {
         console.error(error)
 
-        // Log failed inference
-        await logInference({
-            requestId,
+        // Log failed inference safely if a valid conversation has been established
+        if (conversationId && conversationId !== "unknown") {
+            await logInference({
+                requestId,
 
-            provider: "groq",
+                provider,
 
-            model: "llama-3.3-70b-versatile",
+                model,
 
-            latencyMs: 0,
+                latencyMs: 0,
 
-            status: "error",
+                status: "error",
 
-            errorMessage:
-                error instanceof Error
-                    ? error.message
-                    : "Unknown error",
+                errorMessage:
+                    error instanceof Error
+                        ? error.message
+                        : "Unknown error",
 
-            conversationId,
-        })
+                conversationId,
+            })
+        }
 
-        return new Response("Something went wrong", {
-            status: 500,
-        })
+        return new Response(
+            "Something went wrong",
+            {
+                status: 500,
+            }
+        )
     }
 }

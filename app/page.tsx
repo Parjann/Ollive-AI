@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import ConversationSidebar from "@/components/sidebar/ConversationSidebar"
 import ChatWindow from "@/components/chat/ChatWindow"
 import ChatInput from "@/components/chat/ChatInput"
+import Header from "@/components/Header"
 
 type Message = {
   role: string
@@ -21,11 +22,12 @@ export default function HomePage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [conversationId, setConversationId] = useState("")
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [provider, setProvider] = useState("groq")
+  const [model, setModel] = useState("llama-3.3-70b-versatile")
 
   const [isStreaming, setIsStreaming] = useState(false)
 
-  const [controller, setController] =
-    useState<AbortController | null>(null)
+  const [controller, setController] = useState<AbortController | null>(null)
 
   async function fetchConversations() {
     try {
@@ -82,6 +84,8 @@ export default function HomePage() {
         body: JSON.stringify({
           message: currentInput,
           conversationId,
+          provider,
+          model,
         }),
         signal: abortController.signal,
       })
@@ -151,25 +155,37 @@ export default function HomePage() {
   }, [])
 
   return (
-    <main className="flex h-screen">
+    <main className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 font-sans antialiased">
+      {/* Sidebar Navigation */}
       <ConversationSidebar
         conversations={conversations}
+        activeId={conversationId}
         onSelect={loadConversation}
+        onNewChat={() => {
+          setConversationId("")
+          setMessages([])
+        }}
       />
 
-      <div className="flex-1 p-6 flex flex-col gap-4">
-        <h1 className="text-4xl font-bold">
-          AI Observability Platform
-        </h1>
+      {/* Main Content Pane */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#09090b]">
+        {/* Persistent Sticky Header */}
+        <Header />
 
-        <ChatWindow messages={messages} />
+        {/* Chat Stream Window */}
+        <ChatWindow messages={messages} isStreaming={isStreaming} />
 
+        {/* Input Box Bar */}
         <ChatInput
           input={input}
           setInput={setInput}
           onSend={sendMessage}
           onCancel={handleCancel}
           isStreaming={isStreaming}
+          provider={provider}
+          model={model}
+          setProvider={setProvider}
+          setModel={setModel}
         />
       </div>
     </main>
