@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid"
 import { logInference } from "@/lib/logger"
 
 import { getProvider } from "@/lib/providers"
+import { redactPII } from "@/lib/pii"
 
 export async function POST(req: Request) {
     const requestId = uuidv4()
@@ -176,10 +177,14 @@ export async function POST(req: Request) {
                             status: "success",
 
                             inputPreview:
-                                message.slice(0, 100),
+                                redactPII(
+                                    message.slice(0, 100)
+                                ),
 
                             outputPreview:
-                                fullResponse.slice(0, 100),
+                                redactPII(
+                                    fullResponse.slice(0, 100)
+                                ),
 
                             conversationId:
                                 conversation.id,
@@ -222,9 +227,11 @@ export async function POST(req: Request) {
                 status: "error",
 
                 errorMessage:
-                    error instanceof Error
-                        ? error.message
-                        : "Unknown error",
+                    redactPII(
+                        error instanceof Error
+                            ? error.message
+                            : "Unknown error"
+                    ),
 
                 conversationId,
             })
