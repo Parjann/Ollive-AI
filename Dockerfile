@@ -9,6 +9,14 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED 1
 ENV PORT 3000
 
+# Declare build arguments passed from Docker Compose
+ARG GROQ_API_KEY
+ARG GEMINI_API_KEY
+
+# Inject build arguments as environment variables for compile time
+ENV GROQ_API_KEY=$GROQ_API_KEY
+ENV GEMINI_API_KEY=$GEMINI_API_KEY
+
 # Provide a build-time dummy database url so Next.js build succeeds without connecting to Postgres
 ENV DATABASE_URL postgresql://dummy:dummy@localhost:5432/dummy
 
