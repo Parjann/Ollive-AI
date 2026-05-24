@@ -5,9 +5,18 @@ import {
     LLMProvider,
 } from "./types"
 
-const genAI = new GoogleGenerativeAI(
-    process.env.GEMINI_API_KEY!
-)
+let genAIInstance: GoogleGenerativeAI | null = null
+
+const genAI = new Proxy({} as GoogleGenerativeAI, {
+    get(target, prop, receiver) {
+        if (!genAIInstance) {
+            genAIInstance = new GoogleGenerativeAI(
+                process.env.GEMINI_API_KEY!
+            )
+        }
+        return Reflect.get(genAIInstance, prop, receiver)
+    }
+})
 
 export class GeminiProvider
     implements LLMProvider {
