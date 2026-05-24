@@ -4,7 +4,7 @@ A premium, cloud-native AI inference observability platform built with Next.js, 
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FParjann%2FOllive-AI)
 
-### 🚀 [Live Demo Playground](https://ollive-ai.vercel.app)
+### 🚀 [Live Demo Playground](https://ollive-ai-eight.vercel.app/)
 
 The platform supports:
 - Multi-turn AI conversations
