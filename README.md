@@ -361,6 +361,20 @@ Future improvements:
 
 ---
 
+# Screenshots
+
+## Chat Playground
+
+![Chat UI](./screenshots/chat-ui.png)
+
+---
+
+## Observability Dashboard
+
+![Dashboard](./screenshots/dashboard-ui.png)
+
+---
+
 # Demo
 
 - Screenshots
